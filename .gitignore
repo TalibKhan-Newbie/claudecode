@@ -19,6 +19,10 @@ dist/
 venv/
 .eggs/
 
+# Local recovery artifacts (git bundles / exported patches of this repo).
+*.bundle
+*.patch
+
 # Tooling
 .pytest_cache/
 .ruff_cache/
