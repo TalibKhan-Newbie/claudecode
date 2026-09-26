@@ -1,0 +1,33 @@
+# Secrets
+.env
+
+# Collected data — never commit scraped contact details.
+*.db
+*.db-wal
+*.db-shm
+*.csv
+*.xlsx
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.eggs/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

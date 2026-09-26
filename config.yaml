@@ -1,0 +1,96 @@
+# creator-contacts configuration.
+#
+# Everything here can be overridden per-command. Secrets belong in .env, never
+# in this file (see .env.example).
+
+database: contacts.db
+
+# Default market. IN = India; change regionCode/relevanceLanguage per your target.
+region: IN
+language: hi
+
+band:
+  # Your target: mid-size creators who answer their own email but already have
+  # real reach. Note YouTube rounds public subscriber counts to 3 significant
+  # figures, so treat the edges as approximate.
+  min_followers: 50000
+  max_followers: 60000
+  # Channels that hide their subscriber count cannot be band-filtered. Off by
+  # default; turn on if you would rather review them manually.
+  include_hidden_counts: false
+
+crawl:
+  # Be a good citizen: one request per host per 1.5s, robots.txt obeyed.
+  delay_seconds: 1.5
+  timeout_seconds: 15
+  max_retries: 2
+  obey_robots: true
+  max_pages_per_creator: 8
+  # Creators who write "name [at] gmail dot com" are signalling they do not want
+  # to be auto-harvested. true honours that and skips those addresses.
+  respect_obfuscation: true
+  # Leave blank to auto-build from OUTREACH_CONTACT_URL.
+  user_agent: ""
+
+gate:
+  # Your rule: at least 2 of name / phone / address / email.
+  min_fields: 2
+  # ...but at least one must be an email or phone, or the row is not actionable.
+  # Set false for the literal "any 2 fields" reading.
+  require_reachable: true
+  min_confidence: 0.5
+  # true = only export emails that look deliberately published for business
+  # (near words like "business enquiries", "collab", "management").
+  require_business_email: false
+  count_name_as_field: true
+
+# Search terms per niche. More specific terms find smaller channels — a generic
+# term like "comedy" returns the giants, while "delhi standup open mic" finds
+# exactly the tier you are targeting.
+niches:
+  comedy:
+    - standup comedy india
+    - hindi standup comedy
+    - delhi open mic comedy
+    - mumbai standup crowd work
+    - desi sketch comedy
+    - hindi comedy skit
+
+  shorts:
+    - hindi shorts comedy
+    - indian shorts creator
+    - desi reels comedy
+    - hindi vlog shorts
+
+  podcast:
+    - hindi podcast
+    - indian podcast interview
+    - desi podcast startup
+    - hindi business podcast
+
+  tech:
+    - hindi tech review
+    - indian tech unboxing
+    - hindi coding tutorial
+    - indian gadget review hindi
+
+  food:
+    - indian street food vlog
+    - hindi recipe channel
+    - desi food review
+    - indian cooking shorts
+
+  fitness:
+    - hindi fitness tips
+    - indian gym transformation
+    - desi home workout
+
+  finance:
+    - hindi stock market
+    - indian personal finance hindi
+    - hindi investing basics
+
+  gaming:
+    - hindi gaming commentary
+    - indian bgmi gameplay
+    - hindi minecraft gameplay
