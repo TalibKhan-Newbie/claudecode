@@ -33,19 +33,37 @@ that needs a budget, and the reason why is documented rather than worked around.
 No API key, no `pip install` — pure standard library:
 
 ```bash
-python3 scripts/podcast_contacts.py --term "hindi podcast" --country IN
-python3 scripts/podcast_contacts.py --gmail-only --target 100 --limit 200
-
-# Several search terms at once; a show matching two is read only once
-python3 scripts/podcast_contacts.py -t "hindi podcast" -t "standup comedy" -t "desi startup"
-
-# Build one list across runs — merges and dedupes by email
-python3 scripts/podcast_contacts.py -t "hindi business" --append
+# keyword list in a file, keep going until you stop it
+python3 scripts/podcast_contacts.py -f keywords.txt --loop --gmail-only --target 100
 ```
 
-**The CSV is replaced by default.** That is normal for an output file, but it means
-a second run discards the first run's results. Use `--append` to merge instead, or
-`-o other-name.csv` to keep them separate.
+`keywords.txt` ships with ~40 Indian-market terms to start from — one per line,
+`#` for comments. Press **Ctrl+C** whenever you want to stop; it saves first.
+
+Smaller runs:
+
+```bash
+python3 scripts/podcast_contacts.py --term "hindi podcast" --country IN
+python3 scripts/podcast_contacts.py -t "hindi podcast" -t "standup comedy"
+```
+
+### How the loop behaves
+
+| | |
+|---|---|
+| **Stops on** | Ctrl+C, `--target` reached, or `--max-cycles` |
+| **Saves** | after *every term*, atomically — an interrupt costs at most one term |
+| **Resumes** | re-run the same command; it reads the CSV back and skips what it has |
+| **Live edits** | the keyword file is re-read each cycle, so add terms without restarting |
+| **Dedupes** | by email and by feed, across runs |
+| `--interval` | seconds between cycles (default 1800) |
+| `--fresh` | ignore the existing CSV and start over |
+
+**One honest caveat about looping.** Apple's directory returns the same shows for
+the same term, so a second pass over an unchanged keyword list finds *nothing new*.
+The loop earns its keep two ways: working through a long keyword list, and a long
+`--interval` to catch shows as they get published. It is not a way to squeeze more
+out of five keywords — for that, add keywords.
 
 It searches Apple Podcasts (free, keyless), reads each show's RSS feed, and
 writes a CSV of published owner/business emails. Use it to see real output before

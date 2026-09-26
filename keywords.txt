@@ -1,0 +1,66 @@
+# Search terms for podcast_contacts.py — one per line.
+#
+#   python3 scripts/podcast_contacts.py -f keywords.txt --loop --gmail-only --target 100
+#
+# Add, remove or comment out lines while the loop is running: the file is
+# re-read at the start of every cycle, so no restart is needed.
+#
+# Specific terms find the mid-size creators you want. A bare "comedy" returns
+# the millionaires; "delhi open mic comedy" returns the tier that answers email.
+
+# --- comedy ---
+standup comedy india
+hindi standup comedy
+delhi open mic comedy
+mumbai comedy podcast
+desi comedy podcast
+hindi comedy show
+
+# --- business / startup ---
+hindi business podcast
+indian startup podcast
+desi entrepreneur
+hindi paisa podcast
+indian founder interview
+
+# --- finance ---
+hindi stock market podcast
+indian personal finance hindi
+hindi investing podcast
+
+# --- tech ---
+hindi tech podcast
+indian tech talk hindi
+
+# --- storytelling / true crime (big in India) ---
+hindi kahani podcast
+hindi horror story podcast
+indian true crime hindi
+hindi suspense story
+
+# --- self-help / motivation ---
+hindi motivation podcast
+hindi self improvement
+
+# --- interviews / culture ---
+hindi interview podcast
+indian culture podcast hindi
+bollywood podcast hindi
+
+# --- sports ---
+hindi cricket podcast
+indian sports podcast hindi
+
+# --- health ---
+hindi health podcast
+indian fitness podcast hindi
+
+# --- regional (widen your reach) ---
+marathi podcast
+gujarati podcast
+punjabi podcast
+bengali podcast
+tamil podcast
+telugu podcast
+kannada podcast
+malayalam podcast
