@@ -35,7 +35,17 @@ No API key, no `pip install` — pure standard library:
 ```bash
 python3 scripts/podcast_contacts.py --term "hindi podcast" --country IN
 python3 scripts/podcast_contacts.py --gmail-only --target 100 --limit 200
+
+# Several search terms at once; a show matching two is read only once
+python3 scripts/podcast_contacts.py -t "hindi podcast" -t "standup comedy" -t "desi startup"
+
+# Build one list across runs — merges and dedupes by email
+python3 scripts/podcast_contacts.py -t "hindi business" --append
 ```
+
+**The CSV is replaced by default.** That is normal for an output file, but it means
+a second run discards the first run's results. Use `--append` to merge instead, or
+`-o other-name.csv` to keep them separate.
 
 It searches Apple Podcasts (free, keyless), reads each show's RSS feed, and
 writes a CSV of published owner/business emails. Use it to see real output before

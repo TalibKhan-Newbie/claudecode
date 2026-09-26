@@ -14,12 +14,20 @@ Usage
 -----
     python3 scripts/podcast_contacts.py                         # Hindi podcasts
     python3 scripts/podcast_contacts.py --term "standup comedy" --country IN
-    python3 scripts/podcast_contacts.py --gmail-only --target 100
-    python3 scripts/podcast_contacts.py --term "hindi business" --limit 40 -o out.csv
+    python3 scripts/podcast_contacts.py -t "hindi podcast" -t "desi startup"
+    python3 scripts/podcast_contacts.py --gmail-only --target 100 --limit 200
+    python3 scripts/podcast_contacts.py -t "hindi business" --append
 
-``--target N`` stops as soon as N contacts are collected, so it does not read
-feeds it does not need. Because not every show publishes a usable address, give
-``--limit`` plenty of headroom above the target — roughly double is a safe start.
+``--term`` is repeatable, and a show matching two terms is read only once.
+
+The CSV is **replaced** by default, which is the usual behaviour for an output
+file but will discard an earlier run's results. ``--append`` merges into the
+existing file instead, deduplicating by email address, which is what you want
+when building one list across several search terms.
+
+``--target N`` stops as soon as N contacts are held, so it does not read feeds it
+does not need. Because not every show publishes a usable address, give ``--limit``
+plenty of headroom above the target — roughly double is a safe start.
 
 Scope: this collects the show's published owner/business email only. It does not
 touch personal phone numbers or home addresses — see docs/SCOPE.md.
@@ -30,6 +38,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 import time
@@ -70,6 +79,23 @@ BUSINESS_WORDS = (
 
 #: What --gmail-only accepts. googlemail.com is the same mailbox as gmail.com.
 GMAIL_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+
+#: Fixed CSV columns, so --append into an older file cannot shuffle or drop any.
+COLUMNS = [
+    "name",
+    "host",
+    "email",
+    "email_domain",
+    "email_is_business",
+    "email_source",
+    "email_source_url",
+    "website",
+    "language",
+    "episodes",
+    "genres",
+    "apple_url",
+    "fields_found",
+]
 
 
 def email_domain(address: str) -> str:
@@ -177,11 +203,33 @@ def is_business_email(email: str, context: str) -> bool:
     return any(word in blob for word in BUSINESS_WORDS)
 
 
+def load_existing(path: str) -> list[dict]:
+    """Rows already in ``path``, so ``--append`` can merge instead of replacing.
+
+    A missing or unreadable file is treated as empty — appending should never be
+    the thing that loses the run.
+    """
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, newline="", encoding="utf-8") as handle:
+            return [row for row in csv.DictReader(handle) if row.get("email")]
+    except (OSError, csv.Error, UnicodeDecodeError) as exc:
+        print(f"    ! could not read {path} ({type(exc).__name__}), starting fresh", file=sys.stderr)
+        return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Find podcast business contacts. No API key needed."
     )
-    parser.add_argument("--term", "-t", default="hindi podcast", help="Search term.")
+    parser.add_argument(
+        "--term",
+        "-t",
+        action="append",
+        metavar="TERM",
+        help="Search term. Repeatable: -t 'hindi podcast' -t 'standup comedy'.",
+    )
     parser.add_argument("--country", "-c", default="IN", help="Store country code.")
     parser.add_argument("--limit", "-l", type=int, default=25, help="Shows to check.")
     parser.add_argument("-o", "--out", default="podcast_contacts.csv", help="Output CSV.")
@@ -203,7 +251,15 @@ def main() -> int:
         default=None,
         help="Stop once this many contacts are collected.",
     )
+    parser.add_argument(
+        "--append",
+        "-a",
+        action="store_true",
+        help="Merge into the existing CSV instead of replacing it. Deduped by email.",
+    )
     args = parser.parse_args()
+
+    terms = args.term or ["hindi podcast"]
 
     if args.email_domain:
         allowed = frozenset(d.strip().lower().lstrip("@") for d in args.email_domain if d.strip())
@@ -220,19 +276,45 @@ def main() -> int:
             f"not every show publishes an address. Consider --limit {args.target * 2}."
         )
 
-    print(f"Searching Apple Podcasts for {args.term!r} in {args.country}…")
-    shows = search_podcasts(args.term, args.country, args.limit)
+    # Rows already on disk, so --append merges rather than replaces.
+    rows: list[dict] = []
+    seen_emails: set[str] = set()
+
+    if args.append:
+        existing = load_existing(args.out)
+        rows.extend(existing)
+        seen_emails.update(r.get("email", "").lower() for r in existing if r.get("email"))
+        if existing:
+            print(f"Appending to {args.out} — {len(existing)} contacts already there.")
+    elif os.path.exists(args.out) and os.path.getsize(args.out) > 0:
+        print(
+            f"Note: {args.out} exists and will be REPLACED. "
+            "Use --append to merge instead, or -o another-name.csv."
+        )
+
+    # Collect the shows for every term first, deduped by feed URL so a show that
+    # matches two terms is only read once.
+    shows: list[dict] = []
+    seen_feeds: set[str] = set()
+    for term in terms:
+        print(f"Searching Apple Podcasts for {term!r} in {args.country}…")
+        for show in search_podcasts(term, args.country, args.limit):
+            feed = show.get("feedUrl")
+            if feed and feed not in seen_feeds:
+                seen_feeds.add(feed)
+                shows.append(show)
+
     if not shows:
         print(
-            "\nNo results. Either the network blocked itunes.apple.com, or the term "
+            "\nNo results. Either the network blocked itunes.apple.com, or the terms "
             "found nothing. Try --term 'comedy'.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"Found {len(shows)} shows. Reading their RSS feeds…\n")
+    print(f"\nFound {len(shows)} unique shows across {len(terms)} term(s). Reading feeds…\n")
 
-    rows: list[dict] = []
+    start_count = len(rows)
     for index, show in enumerate(shows, start=1):
         name = show.get("collectionName") or show.get("trackName") or "?"
         feed_url = show.get("feedUrl")
@@ -257,6 +339,11 @@ def main() -> int:
             print(f"    - skipped, {email_domain(email)} not in the domain filter")
             continue
 
+        if email in seen_emails:
+            print(f"    - duplicate, {email} already collected")
+            continue
+        seen_emails.add(email)
+
         source = "itunes:owner/itunes:email" if feed["owner_email"] else "show description"
         business = is_business_email(email, feed["description"])
         genres = show.get("genres") or []
@@ -266,6 +353,7 @@ def main() -> int:
                 "name": feed["title"] or name,
                 "host": feed["author"] or show.get("artistName", ""),
                 "email": email,
+                "email_domain": email_domain(email),
                 "email_is_business": "yes" if business else "",
                 "email_source": source,
                 "email_source_url": feed_url,
@@ -285,6 +373,8 @@ def main() -> int:
             print(f"\nTarget of {args.target} reached — stopping.")
             break
 
+    added = len(rows) - start_count
+
     if not rows:
         hint = (
             " The domain filter may be too strict — many creators use a custom domain."
@@ -294,22 +384,31 @@ def main() -> int:
         print(f"\nNo contacts found.{hint}", file=sys.stderr)
         return 1
 
-    rows.sort(key=lambda r: (r["email_is_business"] != "yes", r["name"].lower()))
+    if added == 0:
+        print(f"\nNo new contacts this run. {args.out} left as it was ({len(rows)} rows).")
+        return 0
 
+    # Business addresses first, then alphabetical. .get() because appended rows
+    # come from a CSV and may predate a column.
+    rows.sort(key=lambda r: (r.get("email_is_business", "") != "yes", r.get("name", "").lower()))
+
+    # A fixed column list, so appending to a file written by an older run cannot
+    # shuffle columns or drop a field.
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({column: row.get(column, "") for column in COLUMNS})
 
-    business_count = sum(1 for r in rows if r["email_is_business"] == "yes")
+    business_count = sum(1 for r in rows if r.get("email_is_business") == "yes")
     print(f"\n{'=' * 58}")
-    print(f"{len(rows)} contacts written to {args.out}")
+    print(f"{len(rows)} contacts in {args.out}  (+{added} new this run)")
     print(f"  {business_count} look explicitly business/collab addresses")
     print(f"  {len(rows) - business_count} are general contact addresses")
     if args.target and len(rows) < args.target:
         print(
-            f"  {len(rows)}/{args.target} of your target — raise --limit or try "
-            "another --term to find more."
+            f"  {len(rows)}/{args.target} of your target — raise --limit, add another "
+            "--term, or run again with --append."
         )
     print("\nEvery row carries email_source_url — keep it, so you can always")
     print("show where an address came from.")
