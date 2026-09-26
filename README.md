@@ -28,6 +28,20 @@ licensed IG vendors   →     → /contact page        →    source URL per val
 YouTube and podcasts carry the project and cost nothing. Instagram is the one
 that needs a budget, and the reason why is documented rather than worked around.
 
+## Try it with zero setup
+
+No API key, no `pip install` — pure standard library:
+
+```bash
+python3 scripts/podcast_contacts.py --term "hindi podcast" --country IN
+```
+
+It searches Apple Podcasts (free, keyless), reads each show's RSS feed, and
+writes a CSV of published owner/business emails. Use it to see real output before
+setting anything up. `--term "standup comedy"`, `--term "hindi business"`, etc.
+
+The full package below adds YouTube, link following, a database and suppression.
+
 ## Install
 
 PyPI access is required for the dependencies:
