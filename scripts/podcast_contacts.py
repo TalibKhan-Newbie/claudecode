@@ -14,7 +14,12 @@ Usage
 -----
     python3 scripts/podcast_contacts.py                         # Hindi podcasts
     python3 scripts/podcast_contacts.py --term "standup comedy" --country IN
+    python3 scripts/podcast_contacts.py --gmail-only --target 100
     python3 scripts/podcast_contacts.py --term "hindi business" --limit 40 -o out.csv
+
+``--target N`` stops as soon as N contacts are collected, so it does not read
+feeds it does not need. Because not every show publishes a usable address, give
+``--limit`` plenty of headroom above the target — roughly double is a safe start.
 
 Scope: this collects the show's published owner/business email only. It does not
 touch personal phone numbers or home addresses — see docs/SCOPE.md.
@@ -62,6 +67,16 @@ BUSINESS_WORDS = (
     "business", "enquir", "inquir", "collab", "brand", "sponsor", "advert",
     "partner", "media", "press", "booking", "management", "manager",
 )
+
+#: What --gmail-only accepts. googlemail.com is the same mailbox as gmail.com.
+GMAIL_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+
+
+def email_domain(address: str) -> str:
+    """Lowercased domain, or '' when there is no '@' (rpartition would else
+    return the whole string as the domain)."""
+    _, at, domain = address.rpartition("@")
+    return domain.strip().lower() if at else ""
 
 
 def fetch(url: str, params: dict | None = None) -> bytes:
@@ -170,7 +185,40 @@ def main() -> int:
     parser.add_argument("--country", "-c", default="IN", help="Store country code.")
     parser.add_argument("--limit", "-l", type=int, default=25, help="Shows to check.")
     parser.add_argument("-o", "--out", default="podcast_contacts.csv", help="Output CSV.")
+    parser.add_argument(
+        "--gmail-only",
+        action="store_true",
+        help="Keep only gmail.com / googlemail.com addresses.",
+    )
+    parser.add_argument(
+        "--email-domain",
+        action="append",
+        metavar="DOMAIN",
+        help="Keep only these domains. Repeatable. Overrides --gmail-only.",
+    )
+    parser.add_argument(
+        "--target",
+        "-n",
+        type=int,
+        default=None,
+        help="Stop once this many contacts are collected.",
+    )
     args = parser.parse_args()
+
+    if args.email_domain:
+        allowed = frozenset(d.strip().lower().lstrip("@") for d in args.email_domain if d.strip())
+    elif args.gmail_only:
+        allowed = GMAIL_DOMAINS
+    else:
+        allowed = frozenset()
+
+    if allowed:
+        print(f"Email filter: only {', '.join(sorted(allowed))}")
+    if args.target and args.limit < args.target * 2:
+        print(
+            f"Note: --limit {args.limit} is tight for a target of {args.target}; "
+            f"not every show publishes an address. Consider --limit {args.target * 2}."
+        )
 
     print(f"Searching Apple Podcasts for {args.term!r} in {args.country}…")
     shows = search_podcasts(args.term, args.country, args.limit)
@@ -205,6 +253,10 @@ def main() -> int:
             print("    - no usable email published")
             continue
 
+        if allowed and email_domain(email) not in allowed:
+            print(f"    - skipped, {email_domain(email)} not in the domain filter")
+            continue
+
         source = "itunes:owner/itunes:email" if feed["owner_email"] else "show description"
         business = is_business_email(email, feed["description"])
         genres = show.get("genres") or []
@@ -226,10 +278,20 @@ def main() -> int:
             }
         )
         flag = " [business]" if business else ""
-        print(f"    OK  {email}{flag}")
+        counter = f"  ({len(rows)}/{args.target})" if args.target else ""
+        print(f"    OK  {email}{flag}{counter}")
+
+        if args.target and len(rows) >= args.target:
+            print(f"\nTarget of {args.target} reached — stopping.")
+            break
 
     if not rows:
-        print("\nNo contacts found. Try a different --term.", file=sys.stderr)
+        hint = (
+            " The domain filter may be too strict — many creators use a custom domain."
+            if allowed
+            else " Try a different --term."
+        )
+        print(f"\nNo contacts found.{hint}", file=sys.stderr)
         return 1
 
     rows.sort(key=lambda r: (r["email_is_business"] != "yes", r["name"].lower()))
@@ -244,6 +306,11 @@ def main() -> int:
     print(f"{len(rows)} contacts written to {args.out}")
     print(f"  {business_count} look explicitly business/collab addresses")
     print(f"  {len(rows) - business_count} are general contact addresses")
+    if args.target and len(rows) < args.target:
+        print(
+            f"  {len(rows)}/{args.target} of your target — raise --limit or try "
+            "another --term to find more."
+        )
     print("\nEvery row carries email_source_url — keep it, so you can always")
     print("show where an address came from.")
     return 0

@@ -9,6 +9,15 @@ database: contacts.db
 region: IN
 language: hi
 
+# How many qualifying creators you want in total. `enrich` stops once it is met,
+# and `export` writes the best this many. Override per run with --target N, or
+# lift it entirely with --no-target.
+#
+# Discovery is deliberately NOT capped by this: not every creator publishes an
+# email, so you need to discover well past your target to land on it. Roughly
+# double is a safe starting assumption.
+target: 100
+
 band:
   # Your target: mid-size creators who answer their own email but already have
   # real reach. Note YouTube rounds public subscriber counts to 3 significant
@@ -43,6 +52,18 @@ gate:
   # (near words like "business enquiries", "collab", "management").
   require_business_email: false
   count_name_as_field: true
+
+  # Restrict which email domains count. Empty list = all domains allowed.
+  # Uncomment for Gmail only (or pass --gmail-only on any command):
+  #
+  #   allowed_email_domains: ["gmail.com", "googlemail.com"]
+  #
+  # Trade-off worth knowing: creators who have grown into a custom domain
+  # (business@studioname.in) or an agency address get dropped, and those are
+  # often the more established ones. The filter runs at the gate, not at
+  # collection, so other addresses stay in the database — widening this later
+  # needs no re-scrape.
+  allowed_email_domains: []
 
 # Search terms per niche. More specific terms find smaller channels — a generic
 # term like "comedy" returns the giants, while "delhi standup open mic" finds

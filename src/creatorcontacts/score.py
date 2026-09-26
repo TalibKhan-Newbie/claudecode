@@ -13,13 +13,21 @@ The gate here therefore has two knobs:
     is not a lead you can email.
 
 Turn ``require_reachable`` off if you want the literal rule.
+
+``allowed_email_domains``
+    Restricts which email domains count at all. Set it to ``{"gmail.com"}`` to keep
+    only Gmail addresses. Note the trade-off: a creator who has grown into a
+    custom domain (``business@studioname.in``) or an agency address is dropped, and
+    those are often the more established ones. The filter runs at the gate rather
+    than at collection, so other addresses stay in the database and widening the
+    filter later needs no re-scrape.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from .models import ContactKind, Creator
+from .models import ContactKind, ContactPoint, Creator
 
 #: Kinds you can actually initiate contact through.
 REACHABLE_KINDS = frozenset({ContactKind.EMAIL, ContactKind.PHONE})
@@ -28,6 +36,19 @@ REACHABLE_KINDS = frozenset({ContactKind.EMAIL, ContactKind.PHONE})
 COUNTABLE_KINDS = frozenset(
     {ContactKind.EMAIL, ContactKind.PHONE, ContactKind.ADDRESS, ContactKind.SOCIAL}
 )
+
+#: What ``--gmail-only`` expands to. googlemail.com is the same mailbox.
+GMAIL_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+
+
+def email_domain(address: str) -> str:
+    """The lowercased domain of an email address, or '' if it has none.
+
+    ``rpartition`` puts the whole string in the tail when the separator is
+    absent, so the presence of the ``@`` is checked rather than assumed.
+    """
+    _, at, domain = address.rpartition("@")
+    return domain.strip().lower() if at else ""
 
 
 @dataclass
@@ -39,6 +60,13 @@ class GateConfig:
     require_business_email: bool = False
     #: Count the display name as one of the fields (your literal rule).
     count_name_as_field: bool = True
+    #: Only these email domains count. Empty means every domain is allowed.
+    allowed_email_domains: frozenset[str] = field(default_factory=frozenset)
+
+    def email_allowed(self, address: str) -> bool:
+        if not self.allowed_email_domains:
+            return True
+        return email_domain(address) in self.allowed_email_domains
 
 
 @dataclass
@@ -66,6 +94,26 @@ def resolve_name(creator: Creator) -> str:
     return (creator.display_name or creator.handle or "").strip()
 
 
+def allowed_emails(creator: Creator, config: GateConfig) -> list[ContactPoint]:
+    """The creator's emails that clear the confidence and domain filters."""
+    return [
+        point
+        for point in creator.contacts_of(ContactKind.EMAIL)
+        if point.confidence >= config.min_confidence and config.email_allowed(point.normalized)
+    ]
+
+
+def best_email(creator: Creator, config: GateConfig | None = None) -> ContactPoint | None:
+    """Highest-confidence email that the gate would accept.
+
+    Export uses this rather than ``Creator.best`` so that a Gmail-only run never
+    writes out the custom-domain address it also happens to hold.
+    """
+    config = config or GateConfig()
+    found = allowed_emails(creator, config)
+    return max(found, key=lambda p: p.confidence) if found else None
+
+
 def evaluate(creator: Creator, config: GateConfig | None = None) -> GateResult:
     """Apply the field gate to one creator."""
     config = config or GateConfig()
@@ -75,6 +123,18 @@ def evaluate(creator: Creator, config: GateConfig | None = None) -> GateResult:
         for point in creator.contacts
         if point.confidence >= config.min_confidence and point.kind in COUNTABLE_KINDS
     ]
+
+    # Emails outside the allowed domains stop counting as a field at all.
+    domain_filtered_out = False
+    if config.allowed_email_domains:
+        before = sum(1 for p in usable if p.kind is ContactKind.EMAIL)
+        usable = [
+            p
+            for p in usable
+            if p.kind is not ContactKind.EMAIL or config.email_allowed(p.normalized)
+        ]
+        after = sum(1 for p in usable if p.kind is ContactKind.EMAIL)
+        domain_filtered_out = before > 0 and after == 0
 
     if config.require_business_email:
         emails = [p for p in usable if p.kind is ContactKind.EMAIL]
@@ -91,12 +151,17 @@ def evaluate(creator: Creator, config: GateConfig | None = None) -> GateResult:
     reachable = bool(kinds & REACHABLE_KINDS)
 
     if config.require_reachable and not reachable:
+        if domain_filtered_out:
+            wanted = ", ".join(sorted(config.allowed_email_domains))
+            reason = f"has an email, but not on {wanted}"
+        else:
+            reason = "no email or phone — cannot be contacted"
         return GateResult(
             passed=False,
             field_count=field_count,
             kinds=tuple(sorted(k.value for k in kinds)),
             reachable=False,
-            reason="no email or phone — cannot be contacted",
+            reason=reason,
         )
 
     if field_count < config.min_fields:
@@ -147,9 +212,16 @@ def lead_score(creator: Creator) -> float:
 
 
 def partition(
-    creators: list[Creator], config: GateConfig | None = None
+    creators: list[Creator],
+    config: GateConfig | None = None,
+    *,
+    target: int | None = None,
 ) -> tuple[list[tuple[Creator, GateResult]], list[tuple[Creator, GateResult]]]:
-    """Split into (exportable, rejected), each ranked by lead score."""
+    """Split into (exportable, rejected), each ranked by lead score.
+
+    ``target`` caps the passing list. The cap is applied *after* ranking, so a
+    target of 100 gives the 100 best leads rather than the first 100 found.
+    """
     config = config or GateConfig()
     passed: list[tuple[Creator, GateResult]] = []
     failed: list[tuple[Creator, GateResult]] = []
@@ -160,4 +232,7 @@ def partition(
 
     passed.sort(key=lambda pair: -lead_score(pair[0]))
     failed.sort(key=lambda pair: -pair[1].field_count)
+
+    if target is not None and target > 0:
+        passed = passed[:target]
     return passed, failed

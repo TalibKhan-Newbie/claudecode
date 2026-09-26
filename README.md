@@ -34,6 +34,7 @@ No API key, no `pip install` — pure standard library:
 
 ```bash
 python3 scripts/podcast_contacts.py --term "hindi podcast" --country IN
+python3 scripts/podcast_contacts.py --gmail-only --target 100 --limit 200
 ```
 
 It searches Apple Podcasts (free, keyless), reads each show's RSS feed, and
@@ -100,6 +101,37 @@ Only want addresses that are clearly published for business?
 ```bash
 creator-contacts export leads.csv --business-email-only
 ```
+
+### Gmail only, and a target of 100
+
+```bash
+creator-contacts enrich --gmail-only --target 100     # stops once 100 qualify
+creator-contacts export leads.csv --gmail-only --target 100
+```
+
+Or set them once in `config.yaml`:
+
+```yaml
+target: 100
+gate:
+  allowed_email_domains: ["gmail.com", "googlemail.com"]
+```
+
+Any domain list works — `--email-domain studiokaam.in --email-domain gmail.com`.
+
+Three things worth knowing:
+
+- **The cap is applied after ranking**, so `--target 100` gives you the 100
+  *highest-scoring* leads, not the first 100 found.
+- **Gmail-only costs you reach.** Creators who have grown into a custom domain
+  (`business@studioname.in`) or an agency address get dropped, and those are often
+  the more established ones. Run `--include-rejected` to see who you're losing.
+- **Discovery is not capped by `target`.** Not every creator publishes an email, so
+  you need to discover well past 100 to land on 100 — roughly double is a safe
+  start. The filter runs at the gate, not at collection, so widening it later
+  needs no re-scrape.
+
+`--no-target` lifts the cap for any command.
 
 ### Finding the small channels
 

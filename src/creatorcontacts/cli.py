@@ -23,7 +23,14 @@ from .config import AppConfig
 from .export import to_csv, to_xlsx
 from .models import Platform
 from .net import Fetcher
-from .score import GateConfig, evaluate, lead_score, partition, resolve_name
+from .score import (
+    GMAIL_DOMAINS,
+    GateConfig,
+    evaluate,
+    lead_score,
+    partition,
+    resolve_name,
+)
 from .sources.links import LinkEnricher
 from .sources.podcast import PodcastSource, link_creator_by_name
 from .sources.providers import available_providers
@@ -76,7 +83,23 @@ def _gate_from(config: AppConfig) -> GateConfig:
         min_confidence=config.gate.min_confidence,
         require_business_email=config.gate.require_business_email,
         count_name_as_field=config.gate.count_name_as_field,
+        allowed_email_domains=frozenset(
+            d.strip().lower().lstrip("@") for d in config.gate.allowed_email_domains if d.strip()
+        ),
     )
+
+
+def _apply_domain_flags(
+    gate: GateConfig, gmail_only: bool, email_domains: list[str] | None
+) -> GateConfig:
+    """Let --gmail-only / --email-domain override the configured domain filter."""
+    if email_domains:
+        gate.allowed_email_domains = frozenset(
+            d.strip().lower().lstrip("@") for d in email_domains if d.strip()
+        )
+    elif gmail_only:
+        gate.allowed_email_domains = GMAIL_DOMAINS
+    return gate
 
 
 def _report(label: str, creators: list, store: Store, gate: GateConfig) -> None:
@@ -253,6 +276,16 @@ def enrich(
     limit: int = typer.Option(50, "--limit", "-l", help="Creators to process."),
     platform: str | None = typer.Option(None, "--platform", "-p"),
     all_creators: bool = typer.Option(False, "--all", help="Re-enrich already-enriched creators."),
+    gmail_only: bool = typer.Option(
+        False, "--gmail-only", help="Count only gmail.com addresses toward the target."
+    ),
+    email_domain: list[str] | None = typer.Option(
+        None, "--email-domain", help="Count only these domains. Repeatable."
+    ),
+    target: int | None = typer.Option(
+        None, "--target", "-n", help="Stop once this many creators qualify (default from config)."
+    ),
+    no_target: bool = typer.Option(False, "--no-target", help="Enrich everything, uncapped."),
     config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
@@ -277,9 +310,29 @@ def enrich(
         max_pages_per_creator=config.crawl.max_pages_per_creator,
         region=config.region,
     )
-    gate = _gate_from(config)
+    gate = _apply_domain_flags(_gate_from(config), gmail_only, email_domain)
+    cap = None if no_target else (target if target is not None else config.target)
+
+    # Creators that already qualify count toward the target, so a second run does
+    # not crawl for leads you have.
+    already = 0
+    if cap:
+        already = sum(
+            1 for creator in store.iter_creators(platform=target_platform)
+            if evaluate(creator, gate).passed
+        )
+        if already >= cap:
+            console.print(
+                f"[green]Target already met:[/] {already}/{cap} creators qualify. "
+                "Nothing to enrich — run `export`, or raise --target."
+            )
+            fetcher.close()
+            store.close()
+            raise typer.Exit()
+
     total_added = 0
     now_passing = 0
+    stopped_early = False
 
     with console.status("[bold]Enriching…[/]") as status:
         for index, creator in enumerate(pending, start=1):
@@ -292,11 +345,23 @@ def enrich(
             store.mark_enriched(creator.creator_id)
             if evaluate(creator, gate).passed:
                 now_passing += 1
+                if cap and already + now_passing >= cap:
+                    stopped_early = True
+                    break
 
+    processed = index if stopped_early else len(pending)
     console.print(
-        f"\n[bold green]Enriched {len(pending)} creators[/]: "
-        f"+{total_added} contact points, [green]{now_passing} now meet the bar[/]"
+        f"\n[bold green]Enriched {processed} creators[/]: "
+        f"+{total_added} contact points, [green]{now_passing} now qualify[/]"
     )
+    if stopped_early:
+        console.print(
+            f"[green]Target of {cap} reached[/] — stopped early, "
+            f"{len(pending) - processed} left unenriched. Run `export` next."
+        )
+    elif cap:
+        console.print(f"[dim]{already + now_passing}/{cap} toward your target.[/]")
+
     fetcher.close()
     store.close()
 
@@ -315,6 +380,16 @@ def export_cmd(
         help="Export rows with no email or phone (your literal 'any 2 fields' rule).",
     ),
     business_email_only: bool = typer.Option(False, "--business-email-only"),
+    gmail_only: bool = typer.Option(
+        False, "--gmail-only", help="Keep only gmail.com / googlemail.com addresses."
+    ),
+    email_domain: list[str] | None = typer.Option(
+        None, "--email-domain", help="Keep only these domains. Repeatable."
+    ),
+    target: int | None = typer.Option(
+        None, "--target", "-n", help="Cap the export at N best leads (default from config)."
+    ),
+    no_target: bool = typer.Option(False, "--no-target", help="Export everything, uncapped."),
     include_rejected: bool = typer.Option(False, "--include-rejected"),
     config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -330,21 +405,38 @@ def export_cmd(
         gate.require_reachable = False
     if business_email_only:
         gate.require_business_email = True
+    gate = _apply_domain_flags(gate, gmail_only, email_domain)
+
+    cap = None if no_target else (target if target is not None else config.target)
 
     creators = list(store.iter_creators(platform=Platform(platform.lower()) if platform else None))
     if not creators:
         console.print("[yellow]Database is empty.[/] Run a `discover` command first.")
         raise typer.Exit()
 
+    if gate.allowed_email_domains:
+        console.print(
+            f"[dim]Email filter: only {', '.join(sorted(gate.allowed_email_domains))}[/]"
+        )
+
     if out.suffix.lower() in (".xlsx", ".xlsm"):
-        written, rejected = to_xlsx(creators, out, config=gate)
+        written, rejected = to_xlsx(creators, out, config=gate, target=cap)
     else:
-        written, rejected = to_csv(creators, out, config=gate, include_rejected=include_rejected)
+        written, rejected = to_csv(
+            creators, out, config=gate, include_rejected=include_rejected, target=cap
+        )
 
     console.print(
         f"[bold green]Wrote {written} leads[/] to [cyan]{out}[/] "
-        f"([yellow]{rejected} below the {gate.min_fields}-field bar[/])"
+        f"([yellow]{rejected} did not qualify[/])"
     )
+    if cap and written == cap:
+        console.print(f"[dim]Capped at your target of {cap} — the {cap} highest-scoring leads.[/]")
+    elif cap and written < cap:
+        console.print(
+            f"[yellow]{written} of {cap} target reached.[/] "
+            "Run more `discover` terms, or `enrich` the creators already found."
+        )
     console.print(
         "[dim]Source-URL columns are included on purpose — keep them so you can "
         "always show where a value came from.[/]"

@@ -13,7 +13,15 @@ import logging
 from pathlib import Path
 
 from .models import ContactKind, Creator
-from .score import GateConfig, GateResult, lead_score, partition, resolve_name
+from .score import (
+    GateConfig,
+    GateResult,
+    best_email,
+    email_domain,
+    lead_score,
+    partition,
+    resolve_name,
+)
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +40,7 @@ COLUMNS = [
     "field_count",
     "fields_present",
     "email",
+    "email_domain",
     "email_is_business",
     "email_confidence",
     "email_source_url",
@@ -47,8 +56,12 @@ COLUMNS = [
 ]
 
 
-def row_for(creator: Creator, gate: GateResult) -> dict[str, object]:
-    email = creator.best(ContactKind.EMAIL)
+def row_for(
+    creator: Creator, gate: GateResult, config: GateConfig | None = None
+) -> dict[str, object]:
+    # best_email respects allowed_email_domains, so a Gmail-only run cannot leak
+    # the custom-domain address the creator also published.
+    email = best_email(creator, config)
     phone = creator.best(ContactKind.PHONE)
     address = creator.best(ContactKind.ADDRESS)
     socials = creator.contacts_of(ContactKind.SOCIAL)
@@ -81,6 +94,7 @@ def row_for(creator: Creator, gate: GateResult) -> dict[str, object]:
         "field_count": gate.field_count,
         "fields_present": "|".join(gate.kinds),
         "email": email.normalized if email else "",
+        "email_domain": email_domain(email.normalized) if email else "",
         "email_is_business": "yes" if (email and email.is_business) else "",
         "email_confidence": email.confidence if email else "",
         "email_source_url": email.evidence.source_url if email else "",
@@ -102,9 +116,13 @@ def to_csv(
     *,
     config: GateConfig | None = None,
     include_rejected: bool = False,
+    target: int | None = None,
 ) -> tuple[int, int]:
-    """Write passing creators to ``out_path``. Returns (written, rejected)."""
-    passed, failed = partition(creators, config)
+    """Write passing creators to ``out_path``. Returns (written, rejected).
+
+    ``target`` caps the row count, keeping the highest-scoring leads.
+    """
+    passed, failed = partition(creators, config, target=target)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -112,7 +130,7 @@ def to_csv(
         writer = csv.DictWriter(handle, fieldnames=COLUMNS, extrasaction="ignore")
         writer.writeheader()
         for creator, gate in passed:
-            writer.writerow(row_for(creator, gate))
+            writer.writerow(row_for(creator, gate, config))
 
     if include_rejected and failed:
         reject_path = out.with_name(out.stem + "_rejected" + out.suffix)
@@ -122,7 +140,7 @@ def to_csv(
             )
             writer.writeheader()
             for creator, gate in failed:
-                writer.writerow({**row_for(creator, gate), "reject_reason": gate.reason})
+                writer.writerow({**row_for(creator, gate, config), "reject_reason": gate.reason})
         log.info("wrote %d rejected rows to %s", len(failed), reject_path)
 
     log.info("wrote %d rows to %s (%d rejected)", len(passed), out, len(failed))
@@ -134,6 +152,7 @@ def to_xlsx(
     out_path: str | Path,
     *,
     config: GateConfig | None = None,
+    target: int | None = None,
 ) -> tuple[int, int]:
     """Same as :func:`to_csv` but formatted, with clickable source links."""
     try:
@@ -143,7 +162,7 @@ def to_xlsx(
     except ImportError as exc:
         raise RuntimeError("XLSX export needs openpyxl: pip install openpyxl") from exc
 
-    passed, failed = partition(creators, config)
+    passed, failed = partition(creators, config, target=target)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Leads"
@@ -157,7 +176,7 @@ def to_xlsx(
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
     for creator, gate in passed:
-        row = row_for(creator, gate)
+        row = row_for(creator, gate, config)
         sheet.append([row.get(column, "") for column in COLUMNS])
 
     for index, column in enumerate(COLUMNS, start=1):

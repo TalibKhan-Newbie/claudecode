@@ -40,6 +40,9 @@ class GateSettings:
     min_confidence: float = 0.5
     require_business_email: bool = False
     count_name_as_field: bool = True
+    #: Only these email domains count. Empty list means all are allowed.
+    #: e.g. ["gmail.com", "googlemail.com"] for Gmail only.
+    allowed_email_domains: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +50,9 @@ class AppConfig:
     database: str = "contacts.db"
     region: str = "IN"
     language: str | None = "hi"
+    #: How many qualifying creators you want in total. Discovery and enrichment
+    #: stop once it is met, and export keeps the best this many.
+    target: int = 100
     band: BandConfig = field(default_factory=BandConfig)
     crawl: CrawlConfig = field(default_factory=CrawlConfig)
     gate: GateSettings = field(default_factory=GateSettings)
@@ -63,7 +69,7 @@ class AppConfig:
 
         raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
 
-        for key in ("database", "region", "language"):
+        for key in ("database", "region", "language", "target"):
             if key in raw:
                 setattr(config, key, raw[key])
 
