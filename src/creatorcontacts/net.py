@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.robotparser
 from dataclasses import dataclass, field
-from typing import Iterable
+from collections.abc import Iterable
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -101,7 +101,7 @@ class Fetcher:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "Fetcher":
+    def __enter__(self) -> Fetcher:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -174,10 +174,11 @@ class Fetcher:
                 with self._client.stream("GET", url) as response:
                     content_type = response.headers.get("content-type", "")
                     # A 4xx is the server's final answer; only 429/5xx deserve a retry.
-                    if response.status_code in (429,) or response.status_code >= 500:
-                        if attempt < self.max_retries:
-                            time.sleep(2.0 * (attempt + 1))
-                            continue
+                    if (
+                        response.status_code == 429 or response.status_code >= 500
+                    ) and attempt < self.max_retries:
+                        time.sleep(2.0 * (attempt + 1))
+                        continue
                     if not any(t in content_type.lower() for t in TEXTUAL_TYPES) and content_type:
                         return FetchResult(url, response.status_code, "", content_type)
 
@@ -211,10 +212,11 @@ class Fetcher:
             self._throttle.wait(host)
             try:
                 response = self._client.get(url, params=params)
-                if response.status_code in (429,) or response.status_code >= 500:
-                    if attempt < self.max_retries:
-                        time.sleep(2.0 * (attempt + 1))
-                        continue
+                if (
+                    response.status_code == 429 or response.status_code >= 500
+                ) and attempt < self.max_retries:
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
                 if response.status_code >= 400:
                     log.warning("%s returned %s: %s", url, response.status_code, response.text[:300])
                     return None

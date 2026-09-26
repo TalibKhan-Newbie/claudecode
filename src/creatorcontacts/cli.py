@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -54,7 +53,7 @@ def _setup_logging(verbose: bool) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def _build(config_path: Optional[str], verbose: bool) -> tuple[AppConfig, Store, Fetcher]:
+def _build(config_path: str | None, verbose: bool) -> tuple[AppConfig, Store, Fetcher]:
     _setup_logging(verbose)
     config = AppConfig.load(config_path)
     store = Store(config.database)
@@ -102,18 +101,18 @@ def _report(label: str, creators: list, store: Store, gate: GateConfig) -> None:
 @discover_app.command("youtube")
 def discover_youtube(
     niche: str = typer.Option(..., "--niche", "-n", help="Niche key from config.yaml."),
-    queries: Optional[list[str]] = typer.Option(None, "--query", "-q", help="Override search terms."),
+    queries: list[str] | None = typer.Option(None, "--query", "-q", help="Override search terms."),
     shorts: bool = typer.Option(False, "--shorts", help="Bias toward Shorts creators."),
     pages: int = typer.Option(2, "--pages", help="Search pages per term (100 quota units each)."),
-    region: Optional[str] = typer.Option(None, "--region"),
-    language: Optional[str] = typer.Option(None, "--language"),
-    min_followers: Optional[int] = typer.Option(None, "--min-subs"),
-    max_followers: Optional[int] = typer.Option(None, "--max-subs"),
+    region: str | None = typer.Option(None, "--region"),
+    language: str | None = typer.Option(None, "--language"),
+    min_followers: int | None = typer.Option(None, "--min-subs"),
+    max_followers: int | None = typer.Option(None, "--max-subs"),
     quota: int = typer.Option(10_000, "--quota", help="Daily Data API unit budget."),
-    published_after: Optional[str] = typer.Option(
+    published_after: str | None = typer.Option(
         None, "--published-after", help="RFC3339, e.g. 2025-01-01T00:00:00Z — finds active channels."
     ),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Find YouTube channels inside the subscriber band via the Data API."""
@@ -125,7 +124,7 @@ def discover_youtube(
         source = YouTubeSource(fetcher, budget=QuotaBudget(limit=quota))
     except ValueError as exc:
         console.print(f"[bold red]{exc}[/]")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from None
 
     console.print(f"[bold]Searching YouTube[/] for {len(terms)} term(s) in niche [cyan]{niche}[/]")
 
@@ -144,7 +143,7 @@ def discover_youtube(
         )
     except QuotaExceeded as exc:
         console.print(f"[bold red]Quota exhausted:[/] {exc}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     finally:
         console.print(f"[dim]Quota used: {source.budget.summary()}[/]")
 
@@ -156,15 +155,15 @@ def discover_youtube(
 @discover_app.command("podcasts")
 def discover_podcasts(
     niche: str = typer.Option(..., "--niche", "-n"),
-    terms: Optional[list[str]] = typer.Option(None, "--term", "-q"),
-    country: Optional[str] = typer.Option(None, "--country"),
+    terms: list[str] | None = typer.Option(None, "--term", "-q"),
+    country: str | None = typer.Option(None, "--country"),
     limit: int = typer.Option(50, "--limit", help="Shows per search term."),
     match_band: bool = typer.Option(
         False,
         "--match-band",
         help="Only keep shows matching an already-discovered in-band channel.",
     ),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Find podcasts and read the owner email from their RSS feed."""
@@ -202,9 +201,9 @@ def discover_podcasts(
 def discover_providers(
     platform: str = typer.Option("instagram", "--platform", "-p"),
     niche: str = typer.Option("", "--niche", "-n"),
-    country: Optional[str] = typer.Option(None, "--country"),
+    country: str | None = typer.Option(None, "--country"),
     limit: int = typer.Option(100, "--limit"),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Query licensed influencer-data vendors (the compliant route for Instagram)."""
@@ -214,7 +213,7 @@ def discover_providers(
         target = Platform(platform.lower())
     except ValueError:
         console.print(f"[bold red]Unknown platform:[/] {platform}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from None
 
     providers = available_providers(fetcher)
     if not providers:
@@ -252,9 +251,9 @@ def discover_providers(
 @app.command()
 def enrich(
     limit: int = typer.Option(50, "--limit", "-l", help="Creators to process."),
-    platform: Optional[str] = typer.Option(None, "--platform", "-p"),
+    platform: str | None = typer.Option(None, "--platform", "-p"),
     all_creators: bool = typer.Option(False, "--all", help="Re-enrich already-enriched creators."),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Follow each creator's published links and pull contacts off their pages."""
@@ -308,8 +307,8 @@ def enrich(
 @app.command("export")
 def export_cmd(
     out: Path = typer.Argument(Path("leads.csv"), help="Output .csv or .xlsx path."),
-    platform: Optional[str] = typer.Option(None, "--platform", "-p"),
-    min_fields: Optional[int] = typer.Option(None, "--min-fields"),
+    platform: str | None = typer.Option(None, "--platform", "-p"),
+    min_fields: int | None = typer.Option(None, "--min-fields"),
     allow_unreachable: bool = typer.Option(
         False,
         "--allow-unreachable",
@@ -317,7 +316,7 @@ def export_cmd(
     ),
     business_email_only: bool = typer.Option(False, "--business-email-only"),
     include_rejected: bool = typer.Option(False, "--include-rejected"),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Write the gated, ranked lead list to CSV or XLSX."""
@@ -360,7 +359,7 @@ def export_cmd(
 def suppress_add(
     value: str = typer.Argument(..., help="Email or E.164 phone to suppress."),
     reason: str = typer.Option("", "--reason", "-r"),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Add an opt-out and delete anything already collected for it."""
     config = AppConfig.load(config_path)
@@ -372,7 +371,7 @@ def suppress_add(
 @suppress_app.command("remove")
 def suppress_remove(
     value: str = typer.Argument(...),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Remove an entry from the do-not-contact list."""
     config = AppConfig.load(config_path)
@@ -383,7 +382,7 @@ def suppress_remove(
 
 @suppress_app.command("list")
 def suppress_list(
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Show the do-not-contact list."""
     config = AppConfig.load(config_path)
@@ -409,7 +408,7 @@ def suppress_list(
 
 @app.command()
 def stats(
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Summarise what is in the database."""
     config = AppConfig.load(config_path)
@@ -429,7 +428,7 @@ def stats(
 @app.command("show")
 def show(
     query: str = typer.Argument(..., help="Substring of a name, handle, or creator_id."),
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Inspect one creator's contacts with full provenance."""
     config = AppConfig.load(config_path)
@@ -485,7 +484,7 @@ def show(
 
 @app.command()
 def clear_cache(
-    config_path: Optional[str] = typer.Option(None, "--config", "-c"),
+    config_path: str | None = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Empty the HTTP response cache."""
     config = AppConfig.load(config_path)

@@ -103,7 +103,17 @@ def _host(url: str) -> str:
 
 
 def should_skip(url: str) -> bool:
-    host = _host(url)
+    """True when ``url`` must not be fetched.
+
+    Fails closed: anything that is not a parseable http(s) URL is skipped, so a
+    ``ftp://`` or ``javascript:`` link in a creator's bio never reaches the
+    fetcher. Matching is host-exact or on a dot-boundary, so ``nottruecaller.in``
+    does not match ``truecaller.com``.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return True
+    host = parsed.netloc.lower().removeprefix("www.")
     if not host:
         return True
     return any(host == blocked or host.endswith("." + blocked) for blocked in SKIP_HOSTS)

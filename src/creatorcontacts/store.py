@@ -103,7 +103,7 @@ class Store:
     def close(self) -> None:
         self.conn.close()
 
-    def __enter__(self) -> "Store":
+    def __enter__(self) -> Store:
         return self
 
     def __exit__(self, *exc: object) -> None:

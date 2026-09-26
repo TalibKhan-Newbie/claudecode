@@ -54,7 +54,7 @@ class AppConfig:
     niches: dict[str, list[str]] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "AppConfig":
+    def load(cls, path: str | Path | None = None) -> AppConfig:
         config = cls()
         target = Path(path or DEFAULT_CONFIG_PATH)
         if not target.exists():
