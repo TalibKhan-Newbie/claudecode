@@ -353,15 +353,25 @@ def extract_phones(
             if e164 in found:
                 continue
             context = _snippet(text, match.start, match.start + len(match.raw_string))
-            is_business = _has_business_marker(context) or source_type is SourceType.TEL_LINK
-            confidence = 0.85 if source_type is SourceType.TEL_LINK else 0.7
-            if is_business:
+            # Reaching this point means the source is in BUSINESS_ONLY_SOURCES —
+            # a tel: link, structured business markup, a labelled contact page or
+            # an RSS owner block. All of those are business-designated by
+            # definition, so the flag is set here rather than re-derived from
+            # nearby words, matching how addresses and JSON-LD emails are marked.
+            confidence = {
+                SourceType.SCHEMA_ORG: 0.88,
+                SourceType.TEL_LINK: 0.85,
+                SourceType.PODCAST_RSS_OWNER: 0.85,
+                SourceType.PROVIDER_API: 0.8,
+                SourceType.CONTACT_PAGE: 0.75,
+            }.get(source_type, 0.7)
+            if _has_business_marker(context):
                 confidence += 0.05
             found[e164] = ContactPoint(
                 kind=ContactKind.PHONE,
                 value=match.raw_string,
                 normalized=e164,
-                is_business=is_business,
+                is_business=True,
                 confidence=round(min(confidence, 0.95), 3),
                 evidence=Evidence(source_url=source_url, source_type=source_type, snippet=context),
             )

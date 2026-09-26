@@ -15,8 +15,8 @@ import logging
 import threading
 import time
 import urllib.robotparser
-from dataclasses import dataclass, field
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
 import httpx
